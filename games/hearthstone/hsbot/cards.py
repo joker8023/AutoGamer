@@ -1,108 +1,127 @@
-"""Card database: names + stats, layered.
+"""Card database.
 
-Layer 1 (preferred): HearthstoneJSON cards.collectible.json.
-Layer 2 (fallback): data/deck.json — only what the deck export gives us.
+Card stats/effects are DATA, not code. The engine loads them from a
+HearthstoneJSON `cards.collectible.json` (https://hearthstonejson.com/)
+when available, and falls back to the minimal deck-local table
+(`data/deck.json`, which only knows name/cost/count from the deck export).
 
-Rule: the engine never hardcodes card effects. Anything not in the data
-is UNKNOWN, and the decision search must not gamble on it.
+Any card whose stats are unknown gets attack/health = None and the
+decision engine treats it conservatively (see decision.py).
 """
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, field
 
 
 @dataclass
 class Card:
-    dbf_id: int
-    name: str
+    dbf_id: int | None = None
+    name: str = ""
     cost: int = 0
-    attack: int | None = None
+    attack: int | None = None  # None = unknown
     health: int | None = None
-    card_type: str = "UNKNOWN"  # MINION / SPELL / HERO / WEAPON / ...
-    race: str | None = None
-    keywords: set[str] = field(default_factory=set)  # TAUNT, DIVINE_SHIELD, ...
+    type: str = ""  # MINION / SPELL / WEAPON / HERO_POWER
     text: str = ""
-    inferred: bool = False  # True when type/race were guessed from the name
-    # Structured effect overrides (from data/overrides.json), e.g.
-    # {"effect_damage": 3, "effect_unknown": False}
-    effect: dict = field(default_factory=dict)
+    mechanics: set[str] = field(default_factory=set)  # TAUNT, DIVINE_SHIELD, ...
+    race: str = ""  # MECHANICAL / MURLOC / DRAGON / BEAST ...
+    # Structured effect hints, filled from the card DB / overrides.
+    # Only effects the engine understands are listed here; anything else
+    # stays "unknown" and the engine will not gamble on it.
+    effect_damage: int | None = None  # direct damage to a target
+    effect_draw: int = 0
+    effect_heal: int = 0
+    effect_summon: str = ""  # card id summoned by this card, if any
+    effect_unknown: bool = True
 
     @property
     def is_minion(self) -> bool:
-        return self.card_type == "MINION"
+        return self.type == "MINION"
 
     @property
-    def effect_unknown(self) -> bool:
-        return self.effect.get("effect_unknown", True)
+    def is_spell(self) -> bool:
+        return self.type == "SPELL"
+
+    @property
+    def is_mech(self) -> bool:
+        return self.race == "MECHANICAL"
+
+    @property
+    def has_taunt(self) -> bool:
+        return "TAUNT" in self.mechanics
+
+    @property
+    def has_divine_shield(self) -> bool:
+        return "DIVINE_SHIELD" in self.mechanics
 
 
 class CardDB:
     def __init__(self) -> None:
-        self.by_id: dict[int, Card] = {}
+        self.by_dbfid: dict[int, Card] = {}
         self.by_name: dict[str, Card] = {}
 
     def add(self, card: Card) -> None:
-        self.by_id[card.dbf_id] = card
-        self.by_name[card.name] = card
+        if card.dbf_id is not None:
+            self.by_dbfid[card.dbf_id] = card
+        if card.name:
+            self.by_name[card.name] = card
 
-    def get_by_id(self, dbf_id: int) -> Card | None:
-        return self.by_id.get(dbf_id)
+    def get_by_dbfid(self, dbf_id: int) -> Card | None:
+        return self.by_dbfid.get(dbf_id)
 
     def get_by_name(self, name: str) -> Card | None:
         return self.by_name.get(name)
 
     @classmethod
-    def from_hearthstone_json(cls, path: str) -> CardDB:
-        """Load the full collectible set from HearthstoneJSON."""
+    def from_hearthstonejson(cls, path: str) -> "CardDB":
+        """Load HearthstoneJSON cards.collectible.json (full exact data)."""
         db = cls()
         with open(path, encoding="utf-8") as f:
-            cards = json.load(f)
-        for raw in cards:
-            db.add(
-                Card(
-                    dbf_id=int(raw["dbfId"]),
-                    name=raw.get("name", ""),
-                    cost=int(raw.get("cost", 0)),
-                    attack=raw.get("attack"),
-                    health=raw.get("health"),
-                    card_type=raw.get("type", "UNKNOWN"),
-                    race=raw.get("race"),
-                    keywords={
-                        k
-                        for k in ("TAUNT", "DIVINE_SHIELD", "RUSH", "CHARGE", "BATTLECRY",
-                                  "DEATHRATTLE", "STEALTH", "WINDFURY", "LIFESTEAL")
-                        if raw.get("mechanics", {}).get(k)
-                    },
-                    text=raw.get("text", ""),
-                )
+            raw = json.load(f)
+        for entry in raw:
+            card = Card(
+                dbf_id=entry.get("dbfId"),
+                name=entry.get("name", ""),
+                cost=entry.get("cost", 0),
+                attack=entry.get("attack"),
+                health=entry.get("health"),
+                type=entry.get("type", ""),
+                text=entry.get("text", ""),
+                mechanics=set(entry.get("mechanics", [])),
+                race=entry.get("race", ""),
+                effect_unknown=True,  # structured effects need the overrides file
             )
+            db.add(card)
         return db
 
     @classmethod
-    def from_deck_json(cls, path: str, overrides_path: str | None = None) -> CardDB:
-        """Fallback: only the cards in our deck, from the deck export."""
+    def from_deck_json(cls, path: str) -> "CardDB":
+        """Minimal fallback: only name/cost/count known from the deck export."""
         db = cls()
         with open(path, encoding="utf-8") as f:
             deck = json.load(f)
-        overrides: dict[str, dict] = {}
-        if overrides_path and os.path.exists(overrides_path):
-            with open(overrides_path, encoding="utf-8") as f:
-                overrides = json.load(f)
-        for raw in deck.get("cards", []):
-            name = raw.get("name", "")
-            db.add(
-                Card(
-                    dbf_id=int(raw["dbfId"]),
-                    name=name,
-                    cost=int(raw.get("cost", 0)),
-                    attack=raw.get("attack"),
-                    health=raw.get("health"),
-                    card_type=raw.get("type", "UNKNOWN"),
-                    race=raw.get("race"),
-                    inferred=raw.get("type_inferred", False),
-                    effect=overrides.get(name, {}),
-                )
+        for entry in deck["cards"]:
+            card = Card(
+                name=entry["name"],
+                cost=entry["cost"],
+                type=entry.get("type", ""),
+                race=entry.get("race", ""),
+                effect_unknown=True,
             )
+            db.add(card)
+        for entry in deck.get("sideboard", []):
+            db.add(Card(name=entry["name"], cost=entry["cost"], type="SPELL"))
         return db
+
+    def apply_overrides(self, path: str) -> None:
+        """Apply structured effect overrides: {name: {effect_damage, ...}}."""
+        with open(path, encoding="utf-8") as f:
+            overrides = json.load(f)
+        for name, eff in overrides.items():
+            card = self.by_name.get(name)
+            if card is None:
+                continue
+            for key, value in eff.items():
+                if hasattr(card, key):
+                    setattr(card, key, value)
+            card.effect_unknown = eff.get("effect_unknown", False)

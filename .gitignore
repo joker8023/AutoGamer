@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Rust / Tauri
+app/src-tauri/target/
+app/src-tauri/gen/
+app/src-tauri/Cargo.lock  # generated; cargo regenerates it, not committed
+app/src-tauri/icons/*.png
+app/src-tauri/icons/*.ico
+app/node_modules/
+
+# Local config / secrets
+app/src-tauri/*.json.bak
+
+# OS
+.DS_Store
+Thumbs.db

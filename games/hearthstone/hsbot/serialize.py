@@ -1,47 +1,66 @@
-"""GameState -> JSON snapshot (for the Tauri console + replay)."""
+"""JSON serialization of GameState for the Tauri sidecar / replay output."""
 from __future__ import annotations
 
-from .state import Entity, GameState, Player
+from .state import Entity, GameState
 
 
-def _entity_json(e: Entity) -> dict:
+def entity_to_dict(ent: Entity | None) -> dict | None:
+    if ent is None:
+        return None
     return {
-        "id": e.id,
-        "card_id": e.card_id,
-        "name": e.name,
-        "cost": e.cost,
-        "attack": e.attack,
-        "health": e.health,
-        "max_health": e.max_health,
-        "taunt": e.taunt,
-        "divine_shield": e.divine_shield,
-        "can_attack": e.can_attack,
-        "summoning_sick": e.summoning_sick,
-        "zone": e.zone,
-        "zone_pos": e.zone_pos,
+        "id": ent.id,
+        "name": ent.name,
+        "card_id": ent.card_id,
+        "controller": ent.controller,
+        "zone": ent.zone,
+        "attack": ent.attack,
+        "health": ent.health,
+        "max_health": ent.max_health,
+        "cost": ent.cost,
+        "taunt": bool(ent.tag("TAUNT")),
+        "divine_shield": bool(ent.tag("DIVINE_SHIELD")),
+        "stealth": bool(ent.tag("STEALTH")),
+        "exhausted": ent.exhausted,
     }
 
 
-def _player_json(p: Player) -> dict:
+def player_to_dict(player, my_id: int) -> dict:
     return {
-        "hero_health": p.hero_health,
-        "mana": p.mana,
-        "max_mana": p.max_mana,
-        "deck_count": p.deck_count,
-        "hero": _entity_json(p.hero) if p.hero else None,
-        "hero_power": _entity_json(p.hero_power) if p.hero_power else None,
-        "hand": [_entity_json(c) for c in p.hand],
-        "board": [_entity_json(m) for m in p.board],
+        "player_id": player.player_id,
+        "is_me": player.player_id == my_id,
+        "hero": entity_to_dict(player.hero),
+        "hero_health": player.hero_health,
+        "hero_power": entity_to_dict(player.hero_power),
+        "weapon": entity_to_dict(player.weapon),
+        "hand": [entity_to_dict(e) for e in player.hand],
+        "board": [entity_to_dict(e) for e in player.board],
+        "mana": player.mana,
+        "max_mana": player.max_mana,
+        "deck_count": player.deck_count,
     }
 
 
-def state_json(state: GameState) -> dict:
+def state_to_dict(state: GameState) -> dict:
     return {
         "turn": state.turn,
         "step": state.step,
         "current_player": state.current_player,
         "is_my_turn": state.is_my_turn,
-        "me": _player_json(state.me),
-        "opp": _player_json(state.opp),
-        "secrets": [_entity_json(s) for s in state.secrets],
+        "my_id": state.my_id,
+        "me": player_to_dict(state.me, state.my_id),
+        "opp": player_to_dict(state.opp, state.my_id),
+        "secrets": [entity_to_dict(e) for e in state.secrets],
     }
+
+
+def state_signature(state: GameState) -> tuple:
+    """Cheap change detection for replay dedup."""
+    snap = state_to_dict(state)
+    me, opp = snap["me"], snap["opp"]
+    return (
+        snap["turn"], snap["step"], snap["current_player"],
+        me["mana"], me["hero_health"], opp["hero_health"],
+        tuple((c["id"], c["name"]) for c in me["hand"]),
+        tuple((c["id"], c["attack"], c["health"]) for c in me["board"]),
+        tuple((c["id"], c["attack"], c["health"]) for c in opp["board"]),
+    )

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AutoGamer — 游戏控制台</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">AutoGamer
+    <select id="gameSelect" class="game-select"></select>
+    <span class="sub" id="gameDesc">—</span>
+  </div>
+  <div class="controls">
+    <span id="statusPill" class="pill stopped">已停止</span>
+    <label class="dryrun"><input type="checkbox" id="dryRunQuick" checked> 干跑（不点鼠标）</label>
+    <button id="btnStart" class="btn primary">启动</button>
+    <button id="btnPause" class="btn" disabled>暂停</button>
+    <button id="btnResume" class="btn" disabled>继续</button>
+    <button id="btnStop" class="btn danger" disabled>停止</button>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="tab active" data-tab="live">对局</button>
+  <button class="tab" data-tab="replay">回放</button>
+  <button class="tab" data-tab="config">配置</button>
+  <button class="tab" data-tab="log">日志</button>
+</nav>
+
+<main>
+  <!-- LIVE -->
+  <section id="tab-live" class="panel active">
+    <div class="meta">
+      <span>回合 <b id="liveTurn">-</b></span>
+      <span>阶段 <b id="liveStep">-</b></span>
+      <span>当前行动 <b id="liveCurrent">-</b></span>
+      <span id="liveHint" class="hint"></span>
+    </div>
+    <div id="liveBoard" class="board"></div>
+    <aside class="side">
+      <h3>本回合计划</h3>
+      <ol id="planList" class="plan"><li class="empty">等待对局开始…</li></ol>
+      <h3>换牌</h3>
+      <div id="mulliganInfo" class="mulligan">—</div>
+    </aside>
+  </section>
+
+  <!-- REPLAY -->
+  <section id="tab-replay" class="panel">
+    <div class="replay-bar">
+      <input id="replayPath" type="text" placeholder="日志文件路径（按所选游戏，如炉石的 Power.log）">
+      <button id="btnReplayLoad" class="btn primary">载入回放</button>
+      <button id="btnReplayPrev" class="btn">◀ 上一步</button>
+      <button id="btnReplayNext" class="btn">下一步 ▶</button>
+      <input id="replaySlider" type="range" min="0" max="0" value="0">
+      <span id="replayPos">0 / 0</span>
+    </div>
+    <div class="meta">
+      <span>回合 <b id="replayTurn">-</b></span>
+      <span>阶段 <b id="replayStep">-</b></span>
+      <span>计划 <b id="replayPlan">-</b></span>
+    </div>
+    <div id="replayBoard" class="board"></div>
+  </section>
+
+  <!-- CONFIG -->
+  <section id="tab-config" class="panel">
+    <form id="configForm" class="form">
+      <div class="hint" id="configGameHint">正在配置：—</div>
+      <label>日志文件路径
+        <input name="logPath" type="text" placeholder="留空用默认路径">
+      </label>
+      <label>cards.collectible.json 路径（HearthstoneJSON，可选）
+        <input name="cardsJson" type="text" placeholder="留空用套牌内置兜底表">
+      </label>
+      <label>效果 overrides.json 路径
+        <input name="overridesJson" type="text" placeholder="留空默认 data/overrides.json">
+      </label>
+      <label>操作延迟（秒）
+        <span class="row">
+          <input name="delayMin" type="number" step="0.1" min="0" value="0.4"> ～
+          <input name="delayMax" type="number" step="0.1" min="0" value="1.2">
+        </span>
+      </label>
+      <label>搜索宽度 Beam Width
+        <input name="beamWidth" type="number" min="1" max="32" value="8">
+      </label>
+      <label class="check"><input name="dryRun" type="checkbox" checked> 干跑模式（只算不点）</label>
+      <button type="submit" class="btn primary">保存配置</button>
+      <span id="configSaved" class="hint"></span>
+    </form>
+    <p class="note">配置保存在应用配置目录的 config.json。改 dry_run / 延迟会实时同步到运行中的 sidecar。</p>
+  </section>
+
+  <!-- LOG -->
+  <section id="tab-log" class="panel">
+    <div class="log-bar">
+      <button id="btnClearLog" class="btn">清空</button>
+      <span class="hint">只显示 bot 事件（换牌 / 决策 / 动作 / 错误），不记录原始日志行。</span>
+    </div>
+    <ul id="eventLog" class="eventlog"></ul>
+  </section>
+</main>
+
+<script type="module" src="main.js"></script>
+</body>
+</html>
