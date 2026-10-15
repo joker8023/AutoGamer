@@ -1,0 +1,54 @@
+{
+ "sample-turn1": {
+  "best": [
+   "END_TURN"
+  ],
+  "ok": [],
+  "note": "Nothing playable: 5-cost minion in hand, 1 mana, board minion just played."
+ },
+ "lethal-plain": {
+  "best": [
+   "ATTACK 10 -> 3",
+   "ATTACK 11 -> 3"
+  ],
+  "ok": [],
+  "note": "Either attack order kills. END_TURN is wrong with lethal on board."
+ },
+ "taunt-wall": {
+  "best": [
+   "PLAY_MINION 安保自动机 (id=12)"
+  ],
+  "ok": [
+   "ATTACK 10 -> 20",
+   "HERO_POWER"
+  ],
+  "note": "Develop board; the 3-attack minion cannot clear the 8-HP taunt. Ending the turn with a playable minion is wrong."
+ },
+ "overdraw-10": {
+  "best": [
+   "PLAY_MINION Filler0 (id=30)",
+   "PLAY_MINION Filler1 (id=31)",
+   "PLAY_MINION Filler2 (id=32)",
+   "PLAY_MINION Filler3 (id=33)",
+   "PLAY_MINION Filler4 (id=34)",
+   "PLAY_MINION Filler5 (id=35)",
+   "PLAY_MINION Filler6 (id=36)",
+   "PLAY_MINION Filler7 (id=37)",
+   "PLAY_MINION Filler8 (id=38)"
+  ],
+  "ok": [
+   "END_TURN"
+  ],
+  "note": "Play a minion first to make room; drawing with a full hand burns the drawn card."
+ },
+ "empty-board-buff": {
+  "best": [
+   "PLAY_MINION 安保自动机 (id=12)"
+  ],
+  "ok": [
+   "END_TURN",
+   "HERO_POWER"
+  ],
+  "note": "A board buff with no board is wasted. Play the minion first."
+ }
+}

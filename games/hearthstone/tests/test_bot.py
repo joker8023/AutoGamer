@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from hsbot.actions import Action, DryRunExecutor  # noqa: E402
+from hsbot.actions import Action, DryRunExecutor, Layout  # noqa: E402
 from hsbot.bot import Bot  # noqa: E402
 from hsbot.cards import CardDB  # noqa: E402
 from hsbot.deck_data import DECK_CODE, HERO_DBFID  # noqa: E402
@@ -116,6 +116,30 @@ def test_bot_dry_run():
     print("bot dry-run OK, executed:", bot.executor.executed)
 
 
+def test_layout_auto():
+    # 16:9 window: the full rect is the board.
+    lay = Layout.from_window_rect(100, 50, 1920, 1080)
+    assert (lay.width, lay.height, lay.offset_x, lay.offset_y) == (1920, 1080, 100, 50)
+    # Ultrawide window: 16:9 board centered, black bars on the sides.
+    lay = Layout.from_window_rect(0, 0, 3440, 1440)
+    assert (lay.width, lay.height) == (2560, 1440)
+    assert (lay.offset_x, lay.offset_y) == ((3440 - 2560) // 2, 0)
+    # Taller window: board height limited, bars top/bottom.
+    lay = Layout.from_window_rect(0, 0, 1920, 1200)
+    assert (lay.width, lay.height) == (1920, 1080)
+    assert lay.offset_y == (1200 - 1080) // 2
+    # Degenerate rect: reference fallback.
+    lay = Layout.from_window_rect(0, 0, 0, 0)
+    assert (lay.width, lay.height) == (1920, 1080)
+    # No such window in the test env: auto_detect falls back, never raises.
+    lay = Layout.auto_detect(("definitely-not-a-real-window-title-xyz",))
+    assert (lay.width, lay.height, lay.offset_x, lay.offset_y) == (1920, 1080, 0, 0)
+    # Coordinates scale with the detected board: END_TURN at 2560x1440.
+    lay = Layout.from_window_rect(0, 0, 2560, 1440)
+    assert lay.end_turn_pos() == (int(1770 * 2560 / 1920), int(480 * 1440 / 1080))
+    print("layout auto OK")
+
+
 if __name__ == "__main__":
     test_deckstring()
     test_log_parser()
@@ -123,4 +147,5 @@ if __name__ == "__main__":
     test_lethal()
     test_decide_turn_plays_on_curve()
     test_bot_dry_run()
+    test_layout_auto()
     print("ALL TESTS PASSED")

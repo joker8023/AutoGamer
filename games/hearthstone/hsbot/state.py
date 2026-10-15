@@ -92,6 +92,12 @@ class GameState:
     entities: dict[int, Entity] = field(default_factory=dict)
     # Sim-only bookkeeping (not from the log).
     sim_exhausted: set[int] = field(default_factory=set)
+    # Game lifecycle (from the log; see log_parser.py).
+    game_over: bool = False
+    game_result: str | None = None  # "WIN" / "LOSS" / "TIE" once known
+    # Post-mulligan hand (card names) recorded when the mulligan phase
+    # ends; used to verify the mulligan kept the expected cards.
+    mulligan_receipt: list[str] | None = None
 
     def __post_init__(self) -> None:
         self.players.setdefault(1, PlayerState(player_id=1))

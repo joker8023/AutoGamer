@@ -164,13 +164,22 @@ class LogParser:
             if tag == "TURN":
                 state.turn = _as_int(value)
             elif tag == "STEP":
+                old_step = state.step
                 state.step = value
+                # Leaving the mulligan phase: record the post-mulligan hand
+                # as the receipt the bot verifies its keeps against.
+                if old_step == "BEGIN_MULLIGAN" and value.startswith("MAIN_"):
+                    state.mulligan_receipt = [e.name for e in state.me.hand]
+                if value in ("FINAL_GAMEOVER", "FINAL_WRAPUP"):
+                    state.game_over = True
             elif tag == "CURRENT_PLAYER":
                 state.current_player = _as_int(value)
             return
         desc = parse_entity_descriptor(ent_text)
         ent = self._get_or_create(desc)
         ent.tags[tag] = _as_int(value)
+        if tag == "PLAYSTATE":
+            self._apply_playstate(ent, value)
         if tag == "ZONE":
             old_zone = ent.zone
             ent.zone = value
@@ -190,6 +199,25 @@ class LogParser:
             if player is not None:
                 player.max_mana = _as_int(value)
         self._place_entity(ent)
+
+    def _apply_playstate(self, ent: Entity, value: str) -> None:
+        """PLAYSTATE on a player entity: WON/WINNER/2 = won, LOST/LOSER/
+        CONCEDED (+3/5) = lost, TIED/TIE/4 = tied. Numeric and named
+        forms are both accepted; anything else is ignored. Sets
+        game_over + game_result from OUR perspective (my_id)."""
+        won = value in ("WON", "WINNER", "2")
+        lost = value in ("LOST", "LOSER", "CONCEDED", "3", "5")
+        tied = value in ("TIED", "TIE", "4")
+        if not (won or lost or tied):
+            return
+        if ent.controller == self.state.my_id:
+            result = "WIN" if won else "LOSS" if lost else "TIE"
+        elif ent.controller != 0:
+            result = "LOSS" if won else "WIN" if lost else "TIE"
+        else:
+            return
+        self.state.game_result = result
+        self.state.game_over = True
 
     def _on_zone_change(self, ent: Entity, old_zone: str, new_zone: str) -> None:
         player = self.state.players.get(ent.controller)

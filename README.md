@@ -29,13 +29,23 @@ Tauri 控制台 (app/) ── JSON-lines stdio ──> hsbot.sidecar ──> Bot
 炉石引擎模块（`games/hearthstone/hsbot/`）：
 
 - `deckstring.py` — 套牌代码解码（已用本套牌代码验证：狂野，30 张主牌，副牌 4 条）。
-- `log_parser.py` — 增量解析 Power.log（TAG_CHANGE / FULL_ENTITY / SHOW_ENTITY / HIDE_ENTITY），折叠成 GameState。
-- `state.py` — 实体、英雄、手牌、场面、费用、奥秘。
-- `decision.py` — 换牌表 + 斩杀检测优先 + 回合内全序列 Beam Search（宽 8，深 14）+ 启发式评分。
-- `actions.py` — 动作 → 屏幕坐标（1920×1080 参考布局，**上线前必须校准**）→ 执行器。
-- `bot.py` — 主循环：tail 日志 → 换牌 → 每回合决策 → 执行（带人化随机延迟）。
-- `sidecar.py` — Tauri sidecar：JSON-lines 协议（start/stop/pause/resume/config），stdout 只走协议，`print` 已静默。
+- `log_parser.py` — 增量解析 Power.log（TAG_CHANGE / FULL_ENTITY / SHOW_ENTITY / HIDE_ENTITY），折叠成 GameState；换牌回执（离开 BEGIN_MULLIGAN 时记录换牌后手牌）+ 对局结束/胜负（FINAL_GAMEOVER / PLAYSTATE）。
+- `state.py` — 实体、英雄、手牌、场面、费用、奥秘；对局结束 `game_over` / `game_result` / `mulligan_receipt`。
+- `decision.py` — 换牌表 + 斩杀检测优先（要求全部步骤 exact）+ 回合内全序列 Beam Search（宽 8，深 14）+ 启发式评分；`decide_turn_traced` 输出 veto/prefer trace；支持 `exclude`（本回合被 ban 的动作）。
+- `deck_config.py` — 套牌配置：`load_deck(deck_id)` 读 `decks/<deck-id>/`（`deck.json` + `mulligan.json` + `strategy.md`）；`deck_data.py` 是薄兼容层（deprecated）。
+- `policy.py` — veto（硬删，END_TURN 永不删）+ prefer（软收窄，永不清空菜单）+ 释放机制（margin 1.0）。
+- `verify.py` — 点击后核对：`verify_action(before, action, after) -> OK | MISFIRE | PENDING`，按动作类型判定预期变化。
+- `masking.py` — 隐私遮罩：`public_view(state)` 只含公开信息（对手手牌/牌库/奥秘只给数量，永不含 BattleTag / 原始日志）。
+- `engine_version.py` — 版本化引擎：`ENGINE_VERSION = "v2"`；`get_engine` 未知版本抛错，永不静默回退。
+- `actions.py` — 动作 → 屏幕坐标（`Layout.auto_detect()` 窗口自适应，找不到回退 1920×1080）→ 执行器；`cancel_drag()` 右键清除卡住的拖拽。
+- `bot.py` — 主循环：tail 日志 → 换牌 → 每回合逐动作决策 → 执行 → 日志核对（OK 继续 / MISFIRE 重试一次后 ban / 超时按 dead 处理；8 连 dead 或 3 连 misfire 停机）；dry-run 走整计划执行（无核对）。
+- `runner.py` — 无人值守批次：局数上限、连败停机（默认 6）、stop 文件、执行器故障、解析器静默、结果不可检出时只跑单局；每局结果写 `runtime/runs/<ts>.jsonl`。
+- `sidecar.py` — Tauri sidecar：JSON-lines 协议（start/stop/pause/resume/config），stdout 只走协议，`print` 已静默；可选 `runner` 配置；无新日志行时仍调 `tick()` 以触发核对超时。
 - `replay.py` — 离线回放：喂 Power.log，输出快照数组（含每回合的 bot 计划）。
+- `eval/` — 离线 A/B 评测：冻结局面 `positions.jsonl` + 人工标签 `labels.json` + `eval_score.py`（1/0.5/0 打分）+ `EVAL.md`。
+
+阈值说明：8 连 dead、3 连 misfire、6 连败、~1.2s settle 是参考项目
+经验的**起点，未在实机上验证**，实机部署前必须重测，不得当成已验证值。
 
 ## Tauri 控制台（app/）
 
@@ -107,26 +117,40 @@ macOS `~/Library/Logs/Blizzard/Hearthstone/Power.log`。
 cd games/hearthstone
 python3 tests/test_bot.py       # 套牌解码 + 日志解析 + 换牌 + 斩杀 + 回合决策 + 干跑
 python3 tests/test_sidecar.py   # sidecar 协议 + 离线回放
+python3 tests/test_phase_a.py   # exact 标记 + 套牌配置 + 隐私遮罩 + 版本化引擎 + 评测 harness
+python3 tests/test_phase_b.py   # veto/prefer 两层规则 + 释放机制 + trace
+python3 tests/test_phase_c.py   # 点击后核对 + 逐动作循环 + Runner 停机条件
 ```
 
 ## 上线前必须做的事
 
-1. **校准 Layout**：`actions.Layout` 的坐标是 1920×1080 参考值，实机上
-   窗口位置/分辨率/DPI 不同，必须先跑一局只看 dry-run 坐标，逐个核对。
+1. **验证 Layout 自适应**：`Layout.auto_detect()` 会自动找游戏窗口
+   （位置 + 尺寸，16:9 信箱式适配），找不到时回退 1920×1080 参考值。
+   实机上先跑一局 dry-run，核对坐标是否落在牌/按钮上；窗口标题、
+   DPI 或非 16:9 导致偏差时，传入显式 `Layout(...)` 覆盖。
 2. **补卡牌数据**：下载 HearthstoneJSON + 写 `games/hearthstone/data/overrides.json`
   （本套牌法术：雷达探测 / 十字军光环 / 恶火 等的效果）。
-3. **换牌确认点击**：`bot._do_mulligan` 目前只打印，确认坐标后接上执行器。
-4. **动画等待**：实机上每次操作后要等动画播完、读日志确认状态变化
-   再下一步（目前 dry-run 无此等待）。
+3. **换牌确认点击**：`bot._do_mulligan` 目前只发事件（含期望保留牌名），
+   未接真实点击（换牌界面卡牌坐标需实机校准）；`verify.py` 的 MULLIGAN
+   判定 + 解析器的换牌回执已就绪，等坐标校准后接入。
+4. **核对阈值实机重测**：逐动作核对闭环已落地（`verify.py` + `bot.py`
+   逐动作循环 + `runner.py`），但 settle（~1.2s）、verify 超时（10s）、
+   dead（8 连）、misfire（3 连）均为未验证起点；实机上需按动画时长、
+   网络延迟重测。
 5. **评估函数调参**：`decision.WEIGHTS` 是初版，自对弈 + 实战回放调。
+   已知评测差距：`overdraw-10` 局面 v1/v2 均错选（权重校准问题，
+   不是 bug；不得为迎合标签调权重）。
 
 ## 明确不做（风险）
 
 - 暴雪对自动对战是封号的。建议先跑「辅助提示」模式（只算不点），
   验证决策质量；自动模式要加局数上限、人化延迟、非 24 小时运行。
 - 本引擎只读 Power.log + 模拟点击，不注入、不读内存。
+- 不接 Jev / Clef 等外部决策模型（需 API key + 花费批准，未获批准）。
+- 未在真实客户端验证过：Layout 自适应、阈值、换牌回执、胜负解析
+  均只通过单元测试 + 离线回放，不得声称已实机验证。
 
 ## 下一步
 
-- 评测 harness：回放实战日志，离线重算最优解，找系统性错误。
+- 评测 harness 已落地（`eval/`）；下一步是喂真实回放扩充局面 + 权重校准。
 - 新游戏（原神等）：新增 `games/<游戏>/`，复用 DecisionProvider / Executor 抽象。
